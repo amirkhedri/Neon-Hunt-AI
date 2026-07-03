@@ -23,8 +23,8 @@ except ImportError:
     AGENT_PLAYER = "PLAYER"
     AGENT_MONSTER = "MONSTER"
 
-# --- EXPANDED SHORT-TERM MEMORY (Fear Boundary Fix) ---
-_recent_positions = []
+# --- FLOOD-FILL TOXICITY MAP ---
+_visit_counts = {}
 _last_known_pos = None
 
 # ------------------------------------------------------------------
@@ -33,18 +33,15 @@ _last_known_pos = None
 _UNREACHABLE = 500  
 
 def get_manhattan_distance(pos1, pos2):
-    if not pos1 or not pos2:
-        return 999
+    if not pos1 or not pos2: return 999
     return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
 def safe_path_distance(state, start, goal):
-    if not start or not goal:
-        return _UNREACHABLE
+    if not start or not goal: return _UNREACHABLE
     if _HAS_MAZE_HELPERS:
         try:
             d = bfs_distance(state, start, goal)
-            if d is None or d < 0:
-                return _UNREACHABLE
+            if d is None or d < 0: return _UNREACHABLE
             return d
         except Exception:
             pass
@@ -54,10 +51,8 @@ def safe_escape_routes(state, position):
     if _HAS_MAZE_HELPERS:
         try:
             routes = escape_routes(state, position)
-            if isinstance(routes, (list, tuple, set)):
-                return len(routes)
-            if isinstance(routes, (int, float)):
-                return int(routes)
+            if isinstance(routes, (list, tuple, set)): return len(routes)
+            if isinstance(routes, (int, float)): return int(routes)
         except Exception:
             pass
     return len(get_possible_moves(state, AGENT_PLAYER))
@@ -68,6 +63,7 @@ def safe_escape_routes(state, position):
 def evaluate(state, current_depth=0):
     terminal_status = is_terminal(state)
 
+    # Depth Weighting: Win as fast as possible, delay losing as long as possible.
     if terminal_status == "PLAYER_WIN":
         return 100000.0 + (current_depth * 1000)
     elif terminal_status == "MONSTER_WIN":
@@ -79,33 +75,29 @@ def evaluate(state, current_depth=0):
 
     score = 0.0
 
-    # 1. Drive toward the exit 
-    score -= d_exit * 1000
-
-    # 2. Mobility / escape-route bonus
-    score += routes * 15
-
-    # 3. Monster avoidance (tiered)
-    if d_monster <= 1:
-        score -= 60000  
-    elif d_monster == 2:
-        score -= 6000   
-    elif d_monster == 3:
-        score -= 600    
+    # 1. NON-LINEAR EXIT PULL
+    # Closer = exponentially higher score. Breaks flat heuristic plateaus.
+    if d_exit < _UNREACHABLE:
+        score += (10000.0 / (d_exit + 1))
     else:
-        score += min(d_monster, 10) * 10
-
-    score += (d_monster - d_exit) * 2
-
-    # 4. Contextual claustrophobia: ONLY panic about dead ends if the monster is near
-    if d_monster <= 4:
-        if routes <= 1:
-            score -= 3000  
-        elif routes == 2:
-            score -= 300   
-
-    if d_exit >= _UNREACHABLE:
         score -= 20000
+
+    # 2. MONSTER FEAR ZONES
+    if d_monster <= 1:
+        score -= 50000
+    elif d_monster == 2:
+        score -= 3000
+    else:
+        # Small reward for maintaining distance
+        score += d_monster * 15
+
+    # 3. CLAUSTROPHOBIA / DEAD-END AVOIDANCE
+    # If in a 1-way tunnel and the exit isn't immediately inside it, panic.
+    if routes <= 1 and d_exit > 2:
+        score -= 4000
+
+    # 4. DETERMINISTIC COORDINATE TIE-BREAKER
+    score += (state.player[0] * 0.1) + (state.player[1] * 0.01)
 
     return score
 
@@ -181,18 +173,15 @@ def alpha_beta(state, depth, alpha, beta, maximizing_player, stats=None):
 # Root move selection
 # ------------------------------------------------------------------
 def choose_player_move(state, depth, use_alpha_beta=True):
-    global _recent_positions
+    global _visit_counts
     global _last_known_pos
 
+    # Wipe the toxicity map if a new level loads
     if _last_known_pos is None or get_manhattan_distance(state.player, _last_known_pos) > 1:
-        _recent_positions = []
+        _visit_counts.clear()
         
     _last_known_pos = state.player
-    _recent_positions.append(state.player)
-    
-    # Expanded to 6 to prevent triangle/box tracing when trapped
-    if len(_recent_positions) > 6:
-        _recent_positions.pop(0)
+    _visit_counts[state.player] = _visit_counts.get(state.player, 0) + 1
 
     stats = {"states_explored": 0, "pruned_branches": 0}
     moves = get_possible_moves(state, AGENT_PLAYER)
@@ -211,14 +200,11 @@ def choose_player_move(state, depth, use_alpha_beta=True):
         else:
             score = minimax(child_state, depth - 1, False, stats)
 
-        # ==========================================================
-        # CRITICAL FIX: The Overpowering Memory Penalty
-        # -2500 is larger than the +1000 exit drive. This forces the 
-        # AI to side-step into a new route or retreat entirely rather 
-        # than bouncing endlessly against the monster's fear radius.
-        # ==========================================================
-        if child_state.player in _recent_positions:
-            score -= 2500
+        # 5. FLOOD-FILL PROGRESSION (The absolute loop breaker)
+        # Every visit to a cell makes it permanently more toxic by 500 points.
+        # It guarantees the AI will eventually break out of ANY trap.
+        visits = _visit_counts.get(child_state.player, 0)
+        score -= (visits * 500)
 
         stable_score = score + move_priority.get(move, 0)
         scores[move] = stable_score
