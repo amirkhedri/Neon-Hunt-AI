@@ -1,88 +1,199 @@
-"""Student AI Template — Neon Hunt
+# ==========================================
+# Neon Hunt - Student AI Implementation
+# ==========================================
 
-IMPORTANT: Replace STUDENT_ID with your own 10-digit numeric student code.
+STUDENT_ID = "1234567890"  # Don't forget your ID
 
-Only these four functions are TODO for students:
-1. evaluate
-2. minimax
-3. alpha_beta
-4. choose_player_move
+from neon_hunt.ai.student_support import (
+    get_possible_moves,
+    apply_move,
+    is_terminal
+)
+import math
 
-The game-rule helpers are already provided:
-- get_possible_moves
-- apply_move
-- is_terminal
-"""
-# TODO: write your own 10-digit numeric student code here.
-# Example: STUDENT_ID = "4021234567"
-STUDENT_ID = "0000000000"
+try:
+    from neon_hunt.ai.student_support import AGENT_PLAYER, AGENT_MONSTER
+except ImportError:
+    AGENT_PLAYER = "PLAYER"
+    AGENT_MONSTER = "MONSTER"
 
-from math import inf
+# --- GLOBAL MEMORY ---
+real_visited_cells = {}
+last_known_pos = None
 
-from neon_hunt.config import AGENT_PLAYER, AGENT_MONSTER
-from neon_hunt.engine import bfs_distance, escape_routes
-from neon_hunt.ai.student_support import get_possible_moves, apply_move, is_terminal
+def get_manhattan_distance(pos1, pos2):
+    if not pos1 or not pos2: return 999
+    return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
-
-def evaluate(state):
-    """Return a score from the Player/Hacker perspective.
-
-    Higher is better for the player.
-
-    Suggested ideas:
-    - PLAYER_WIN should be a very large positive score.
-    - MONSTER_WIN should be a very large negative score.
-    - Being closer to the exit is good.
-    - Being farther from the monster is good.
-    - Having more escape routes is good.
+def evaluate(state, current_depth=0):
     """
-    result = is_terminal(state)
-    if result == "PLAYER_WIN":
-        return 100000.0
-    if result == "MONSTER_WIN":
-        return -100000.0
+    Core Heuristic Evaluation.
+    """
+    terminal_status = is_terminal(state)
+    
+    # 1. Depth-weighted terminal states
+    if terminal_status == "PLAYER_WIN":
+        return 100000.0 + (current_depth * 1000)
+    elif terminal_status == "MONSTER_WIN":
+        return -100000.0 - (current_depth * 1000)
 
-    d_exit = bfs_distance(state, state.player, state.exit)
-    d_monster = bfs_distance(state, state.player, state.monster)
-    routes = escape_routes(state, state.player)
+    d_exit = get_manhattan_distance(state.player, state.exit)
+    d_monster = get_manhattan_distance(state.player, state.monster)
+    
+    score = 0.0
 
-    # TODO: improve this heuristic.
-    return float(-6.0 * d_exit + 4.0 * d_monster + 2.0 * routes)
+    # 2. Aggressive push to the exit
+    score -= (d_exit * 100)
 
+    # 3. Monster Avoidance (Tiered)
+    if d_monster <= 1:
+        score -= 50000  
+    elif d_monster == 2:
+        score -= 5000   
+    elif d_monster == 3:
+        score -= 500    
+    else:
+        # Slight reward for keeping distance
+        score += (d_monster * 5) 
+
+    # 4. Backup state penalty for the simulation itself
+    global real_visited_cells
+    if state.player in real_visited_cells:
+        score -= 1000
+
+    return score
 
 def minimax(state, depth, maximizing_player, stats=None):
-    """Depth-limited Minimax from the Player's perspective."""
-    # TODO: implement minimax.
-    raise NotImplementedError("Implement minimax(state, depth, maximizing_player, stats=None)")
+    if stats is not None:
+        stats["states_explored"] = stats.get("states_explored", 0) + 1
 
+    terminal_status = is_terminal(state)
+    if depth == 0 or terminal_status != "ONGOING":
+        return evaluate(state, depth)
+
+    if maximizing_player:
+        max_eval = -math.inf
+        moves = get_possible_moves(state, AGENT_PLAYER)
+        if not moves:
+            return evaluate(state, depth)
+            
+        for move in moves:
+            child_state = apply_move(state, move, AGENT_PLAYER)
+            eval_score = minimax(child_state, depth - 1, False, stats)
+            max_eval = max(max_eval, eval_score)
+        return max_eval
+        
+    else:
+        min_eval = math.inf
+        moves = get_possible_moves(state, AGENT_MONSTER)
+        if not moves:
+            return evaluate(state, depth)
+            
+        for move in moves:
+            child_state = apply_move(state, move, AGENT_MONSTER)
+            eval_score = minimax(child_state, depth - 1, True, stats)
+            min_eval = min(min_eval, eval_score)
+        return min_eval
 
 def alpha_beta(state, depth, alpha, beta, maximizing_player, stats=None):
-    """Minimax with alpha-beta pruning from the Player's perspective."""
-    # TODO: implement alpha-beta pruning.
-    raise NotImplementedError("Implement alpha_beta(state, depth, alpha, beta, maximizing_player, stats=None)")
+    if stats is not None:
+        stats["states_explored"] = stats.get("states_explored", 0) + 1
 
+    terminal_status = is_terminal(state)
+    if depth == 0 or terminal_status != "ONGOING":
+        return evaluate(state, depth)
+
+    if maximizing_player:
+        max_eval = -math.inf
+        moves = get_possible_moves(state, AGENT_PLAYER)
+        if not moves:
+            return evaluate(state, depth)
+            
+        for move in moves:
+            child_state = apply_move(state, move, AGENT_PLAYER)
+            eval_score = alpha_beta(child_state, depth - 1, alpha, beta, False, stats)
+            max_eval = max(max_eval, eval_score)
+            alpha = max(alpha, eval_score)
+            if beta <= alpha:
+                if stats is not None:
+                    stats["pruned_branches"] = stats.get("pruned_branches", 0) + 1
+                break
+        return max_eval
+        
+    else:
+        min_eval = math.inf
+        moves = get_possible_moves(state, AGENT_MONSTER)
+        if not moves:
+            return evaluate(state, depth)
+            
+        for move in moves:
+            child_state = apply_move(state, move, AGENT_MONSTER)
+            eval_score = alpha_beta(child_state, depth - 1, alpha, beta, True, stats)
+            min_eval = min(min_eval, eval_score)
+            beta = min(beta, eval_score)
+            if beta <= alpha:
+                if stats is not None:
+                    stats["pruned_branches"] = stats.get("pruned_branches", 0) + 1
+                break
+        return min_eval
 
 def choose_player_move(state, depth, use_alpha_beta=True):
-    """Choose the Player/Hacker move using minimax or alpha-beta.
+    global real_visited_cells
+    global last_known_pos
+    
+    # 1. Update Global History
+    # If the player teleports (new level or manual reset), wipe the history clean
+    if last_known_pos is None or get_manhattan_distance(state.player, last_known_pos) > 1:
+        real_visited_cells.clear()
+        
+    last_known_pos = state.player
+    real_visited_cells[state.player] = real_visited_cells.get(state.player, 0) + 1
 
-    Return format:
-    {
-        "best_move": "UP",
-        "scores": {"UP": 1.2, "DOWN": -5.0},
-        "states_explored": 42,
-        "pruned_branches": 7,
-        "principal_variation": []
+    stats = {
+        "states_explored": 0,
+        "pruned_branches": 0
     }
-    """
+    
     moves = get_possible_moves(state, AGENT_PLAYER)
-    if not moves:
-        return {
-            "best_move": None,
-            "scores": {},
-            "states_explored": 0,
-            "pruned_branches": 0,
-            "principal_variation": [],
-        }
+    best_move = None
+    best_score = -math.inf
+    scores = {}
 
-    # TODO: call alpha_beta or minimax for each candidate move and return best.
-    raise NotImplementedError("Implement choose_player_move(state, depth, use_alpha_beta=True)")
+    # Deterministic Tie-Breaker
+    move_priority = {"UP": 0.04, "RIGHT": 0.03, "DOWN": 0.02, "LEFT": 0.01}
+
+    for move in moves:
+        child_state = apply_move(state, move, AGENT_PLAYER)
+        
+        # Calculate base future score
+        if use_alpha_beta:
+            score = alpha_beta(child_state, depth - 1, -math.inf, math.inf, False, stats)
+        else:
+            score = minimax(child_state, depth - 1, False, stats)
+
+        # =======================================================
+        # THE ULTIMATE LOOP BREAKER
+        # Apply a massive penalty if the IMMEDIATE NEXT STEP has 
+        # already been visited in the real game.
+        # =======================================================
+        if child_state.player in real_visited_cells:
+            penalty = real_visited_cells[child_state.player] * 15000
+            score -= penalty
+
+        stable_score = score + move_priority.get(move, 0)
+        scores[move] = stable_score
+        
+        if stable_score > best_score:
+            best_score = stable_score
+            best_move = move
+
+    # Fallback to prevent crashes
+    if best_move is None and moves:
+        best_move = moves[0]
+
+    return {
+        "best_move": best_move,
+        "scores": scores,
+        "states_explored": stats["states_explored"],
+        "pruned_branches": stats["pruned_branches"]
+    }
