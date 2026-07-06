@@ -86,6 +86,7 @@ python main.py
 
 
 ---
+The Report of the Project is inside docs folder give it a visit!
 
 ## 🎓 Academic Context
 
