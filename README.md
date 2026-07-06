@@ -68,10 +68,8 @@ If a loss is mathematically inevitable, the AI explicitly chooses the path that 
 ### Quick Start
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/amirkhedri/Neon-Hunt-AI.git](https://github.com/amirkhedri/Neon-Hunt-AI.git)
-   cd Neon-Hunt-AI
+   git clone https://github.com/amirkhedri/Neon-Hunt-AI.git
 
-```
 
 2. **Run the game environment:**
 ```bash
@@ -96,7 +94,3 @@ This project was developed as Project 3 for the **Fundamentals and Applications 
 * **University:** Faculty of Computer Engineering, University of Isfahan
 * **Semester:** Spring 2026 (1404-1405)
 * **Author:** Amir Khedri
-
-```
-
-```
